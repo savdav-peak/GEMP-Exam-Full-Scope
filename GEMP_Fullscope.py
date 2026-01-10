@@ -1760,118 +1760,92 @@ if 'start_times' not in st.session_state: st.session_state.start_times = {}
 if 'answers' not in st.session_state: st.session_state.answers = {k: {} for k in EXAM_DATA.keys()}
 if 'flags' not in st.session_state: st.session_state.flags = {k: [] for k in EXAM_DATA.keys()}
 
-# --- TIMER HELPER ---
-def get_timer_display(section):
-    if section not in st.session_state.start_times:
-        st.session_state.start_times[section] = time.time()
-    elapsed = time.time() - st.session_state.start_times[section]
-    rem = EXAM_DATA[section]["time_limit"] - elapsed
-    if rem <= 0: return "TIME EXPIRED", 0
-    m, s = divmod(int(rem), 60)
-    h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{secs:02d}" if 'secs' in locals() else f"{h:02d}:{m:02d}:{s:02d}", rem
-
-# --- VIEW: LOBBY ---
+# --- LOBBY VIEW ---
 if st.session_state.view == "Lobby":
-    st.title("🎓 GEMP 2024 Examination Suite")
-    st.write("Complete all three modules to view your final performance report.")
-    
+    st.title("🎓 GEMP Unified Portal")
     cols = st.columns(3)
     for i, (key, info) in enumerate(EXAM_DATA.items()):
         with cols[i]:
-            with st.container(border=True):
-                st.subheader(info["title"])
-                st.write(info["description"])
-                if key in st.session_state.completed:
-                    st.success("✅ Completed")
-                else:
-                    if st.button(f"Start {key}", use_container_width=True):
-                        st.session_state.view = key
-                        st.session_state[f"ptr_{key}"] = 0
-                        st.rerun()
-    
-    if len(st.session_state.completed) == 3:
-        st.divider()
-        if st.button("📊 VIEW FINAL SCORE REPORT", type="primary", use_container_width=True):
-            st.session_state.view = "Results"
-            st.rerun()
+            st.subheader(info["title"])
+            if key in st.session_state.completed:
+                st.success("✅ Completed")
+            else:
+                if st.button(f"Start {key}", key=f"start_{key}"):
+                    st.session_state.start_times[key] = time.time()
+                    st.session_state.view = key
+                    st.session_state[f"ptr_{key}"] = 0
+                    st.rerun()
 
-# --- VIEW: EXAM MODULE ---
+# --- EXAM MODULE (WITH AUTO-TICKING TIMER) ---
 elif st.session_state.view in EXAM_DATA:
     sec = st.session_state.view
     qs = EXAM_DATA[sec]["questions"]
     ptr = st.session_state.get(f"ptr_{sec}", 0)
     
-    # Sidebar: Timer & Navigation
+    # 1. LIVE TIMER LOGIC (This part now auto-updates)
     with st.sidebar:
-        display, rem = get_timer_display(sec)
-        st.header(f"⏳ {display}")
+        st.header("⏳ Time Remaining")
+        timer_placeholder = st.empty()
+        
+        # Calculate time
+        elapsed = time.time() - st.session_state.start_times[sec]
+        rem = EXAM_DATA[sec]["time_limit"] - elapsed
+        
         if rem <= 0:
+            st.error("TIME EXPIRED")
             st.session_state.completed.append(sec)
             st.session_state.view = "Lobby"
             st.rerun()
         
+        m, s = divmod(int(rem), 60)
+        h, m = divmod(m, 60)
+        timer_placeholder.subheader(f"{h:02d}:{m:02d}:{s:02d}")
+        
         st.divider()
-        st.subheader("Question Navigator")
+        st.write("**Navigation Grid**")
         nav_cols = st.columns(4)
         for i in range(len(qs)):
-            status = "⚪"
-            if i in st.session_state.flags[sec]: status = "🚩"
-            elif i in st.session_state.answers[sec]: status = "🔵"
-            if nav_cols[i % 4].button(f"{status}{i+1}", key=f"nav_{sec}_{i}"):
+            lbl = f"{i+1}"
+            if i in st.session_state.flags[sec]: lbl = f"🚩{i+1}"
+            elif i in st.session_state.answers[sec]: lbl = f"🔵{i+1}"
+            if nav_cols[i%4].button(lbl, key=f"nav_{i}"):
                 st.session_state[f"ptr_{sec}"] = i
                 st.rerun()
         
-        st.divider()
-        if st.button("🏁 Submit Section", type="primary", use_container_width=True):
+        if st.button("🏁 Submit Section", type="primary"):
             st.session_state.completed.append(sec)
             st.session_state.view = "Lobby"
             st.rerun()
 
-    # Main Area: Questions
+    # 2. QUESTION DISPLAY
     st.title(EXAM_DATA[sec]["title"])
-    item = qs[ptr]
-    
+    q_item = qs[ptr]
     with st.container(border=True):
-        st.write(f"**Question {ptr + 1} of {len(qs)}**")
-        st.markdown(f"### {item['q']}")
-        
-        ans_idx = st.session_state.answers[sec].get(ptr, None)
-        choice = st.radio("Select your answer:", item["options"], 
-                          index=item["options"].index(ans_idx) if ans_idx else None,
-                          key=f"q_input_{sec}_{ptr}")
-        if choice:
-            st.session_state.answers[sec][ptr] = choice
+        st.write(f"Question {ptr+1}")
+        st.markdown(f"### {q_item['q']}")
+        ans = st.radio("Select Choice:", q_item["options"], 
+                       index=q_item["options"].index(st.session_state.answers[sec].get(ptr)) if st.session_state.answers[sec].get(ptr) else None,
+                       key=f"rad_{ptr}")
+        if ans: st.session_state.answers[sec][ptr] = ans
 
-    # Footer: Prev, Flag, Next
-    f1, f2, f3 = st.columns(3)
-    with f1: 
-        if st.button("⬅️ Previous", disabled=ptr==0):
+    # 3. CONTROLS
+    c1, c2, c3 = st.columns(3)
+    with c1: 
+        if st.button("⬅️ Previous") and ptr > 0:
             st.session_state[f"ptr_{sec}"] -= 1
             st.rerun()
-    with f2:
-        if st.button("🚩 Flag / Unflag"):
+    with c2:
+        if st.button("🚩 Flag"):
             if ptr in st.session_state.flags[sec]: st.session_state.flags[sec].remove(ptr)
             else: st.session_state.flags[sec].append(ptr)
             st.rerun()
-    with f3:
-        if st.button("Next ➡️", disabled=ptr==len(qs)-1):
+    with c3:
+        if st.button("Next ➡️") and ptr < len(qs)-1:
             st.session_state[f"ptr_{sec}"] += 1
             st.rerun()
 
-# --- VIEW: RESULTS ---
-elif st.session_state.view == "Results":
-    st.title("🎯 Final Results Dashboard")
-    for sec in EXAM_DATA.keys():
-        qs = EXAM_DATA[sec]["questions"]
-        correct = 0
-        for i, q in enumerate(qs):
-            user_ans = st.session_state.answers[sec].get(i)
-            if user_ans == q["options"][q["correct"]]:
-                correct += 1
-        st.metric(f"{sec} Score", f"{(correct/len(qs))*100:.1f}%", f"{correct}/{len(qs)} Correct")
-        with st.expander(f"Review {sec} Correct Answers"):
-            for i, q in enumerate(qs):
-                st.write(f"**Q{i+1}:** {q['q']}")
-                st.success(f"Correct: {q['options'][q['correct']]}")
-                st.info(f"Why? {q['explanation']}")
+    # THE AUTO-REFRESH TRIGGER
+    # This tells Streamlit to rerun every 10 seconds to update the clock 
+    # (keeps it low-resource but functional)
+    time.sleep(1)
+    st.rerun()
