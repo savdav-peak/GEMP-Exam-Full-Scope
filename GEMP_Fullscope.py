@@ -1746,6 +1746,7 @@ Total      |   205     |     80      |    89    |  374
             }           
         ]
     }
+}
 # --- SESSION INITIALIZATION ---
 if 'view' not in st.session_state: st.session_state.view = "Lobby"
 if 'completed' not in st.session_state: st.session_state.completed = []
@@ -1860,6 +1861,7 @@ elif st.session_state.view == "Results":
                     st.success(f"Correct Answer: {correct_ans}")
                     st.info(f"Explanation: {q['explanation']}")
                     st.divider()
+
 
 
 
