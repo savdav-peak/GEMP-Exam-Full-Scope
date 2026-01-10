@@ -1011,7 +1011,6 @@ EXAM_DATA = {
 # Paste Part B list
     "General": { "title": "General Paper",
 "questions": [
-questions = [
     # ... (I have included the full high-fidelity database below) ...
     # ENGLISH SECTION
         # --- QUESTIONS ---
@@ -1861,5 +1860,6 @@ elif st.session_state.view == "Results":
                     st.success(f"Correct Answer: {correct_ans}")
                     st.info(f"Explanation: {q['explanation']}")
                     st.divider()
+
 
 
