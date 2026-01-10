@@ -1754,133 +1754,120 @@ Total      |   205     |     80      |    89    |  374
         ]
     }
 }
-# --- 3. SESSION STATE (STATE-SYNC) ---
+# --- 3. SESSION STATE INITIALIZATION ---
 if 'view' not in st.session_state: st.session_state.view = "Lobby"
-if 'completed_sections' not in st.session_state: st.session_state.completed_sections = {} # Stores scores
+if 'results' not in st.session_state: st.session_state.results = {} 
 if 'answers' not in st.session_state: st.session_state.answers = {k: {} for k in EXAM_DATA}
+if 'flags' not in st.session_state: st.session_state.flags = {k: [] for k in EXAM_DATA}
 if 'start_times' not in st.session_state: st.session_state.start_times = {}
 
-# --- 4. CALCULATING SCORES ---
-def calculate_section_score(sec_key):
-    data = EXAM_DATA[sec_key]["questions"]
-    user_answers = st.session_state.answers[sec_key]
-    correct_count = 0
-    for i, q in enumerate(data):
-        if user_answers.get(i) == q["options"][q["correct"]]:
-            correct_count += 1
-    return correct_count, len(data)
+# --- 4. HELPER FUNCTIONS ---
+def get_score(sec):
+    qs = EXAM_DATA[sec]["questions"]
+    ans = st.session_state.answers[sec]
+    correct = sum(1 for i, q in enumerate(qs) if ans.get(i) == q["options"][q["correct"]])
+    return correct, len(qs)
 
-# --- 5. VIEWS ---
-
-# 5A. LOBBY VIEW
+# --- 5. LOBBY VIEW ---
 if st.session_state.view == "Lobby":
-    st.title("🏛️ GEMP 2026 Entrance Simulator")
+    st.title("🏛️ GEMP 2026 Unified Portal")
     
-    total_score = sum([v[0] for v in st.session_state.completed_sections.values()])
-    total_qs = sum([v[1] for v in st.session_state.completed_sections.values()])
-    
-    if total_qs > 0:
-        st.metric("OVERALL SCORE", f"{total_score} / {total_qs}", f"{round((total_score/total_qs)*100, 1)}%")
+    # Global Metrics
+    if st.session_state.results:
+        total_c = sum(v[0] for v in st.session_state.results.values())
+        total_q = sum(v[1] for v in st.session_state.results.values())
+        st.metric("OVERALL SCORE", f"{total_c} / {total_q}", f"{round((total_c/total_q)*100, 1)}%")
 
     cols = st.columns(3)
     for i, (key, info) in enumerate(EXAM_DATA.items()):
         with cols[i]:
             with st.container(border=True):
                 st.subheader(info["title"])
-                st.caption(info["description"]) # Added description
-                
-                if key in st.session_state.completed_sections:
-                    s, t = st.session_state.completed_sections[key]
-                    st.success(f"Score: {s}/{t} ({round((s/t)*100, 1)}%)")
+                st.caption(info["desc"])
+                if key in st.session_state.results:
+                    c, t = st.session_state.results[key]
+                    st.success(f"Score: {c}/{t} ({round((c/t)*100, 1)}%)")
+                    if st.button(f"Review {key}", key=f"rev_{key}"):
+                        st.session_state.view = f"Review_{key}"
+                        st.rerun()
                 else:
-                    if st.button(f"🚀 Begin {key}", key=f"btn_{key}", use_container_width=True):
+                    if st.button(f"Start {key}", use_container_width=True, key=f"btn_{key}"):
                         st.session_state.start_times[key] = time.time()
                         st.session_state.view = key
+                        st.session_state[f"ptr_{key}"] = 0
                         st.rerun()
 
-# 5B. EXAM VIEW (Fixed Timer & Score Logic)
+# --- 6. EXAM MODULE ---
 elif st.session_state.view in EXAM_DATA:
     sec = st.session_state.view
     data = EXAM_DATA[sec]
+    ptr = st.session_state[f"ptr_{sec}"]
     
     # Live Sidebar
     with st.sidebar:
-        elapsed = time.time() - st.session_state.start_times[sec]
-        rem = data["time_limit"] - elapsed
+        # Real-time Timer
+        rem = data["limit"] - (time.time() - st.session_state.start_times[sec])
+        if rem <= 0:
+            st.session_state.results[sec] = get_score(sec)
+            st.session_state.view = "Lobby"
+            st.rerun()
         
-        # High-Fidelity Timer
-        m, s = divmod(int(rem), 60)
-        h, m = divmod(m, 60)
+        m, s = divmod(int(rem), 60); h, m = divmod(m, 60)
         st.header(f"⏱️ {h:02d}:{m:02d}:{s:02d}")
         
         st.divider()
+        st.write("Navigator")
+        nav_cols = st.columns(4)
+        for i in range(len(data["questions"])):
+            icon = "⚪"
+            if i in st.session_state.flags[sec]: icon = "🚩"
+            elif i in st.session_state.answers[sec]: icon = "🔵"
+            if nav_cols[i%4].button(f"{icon}{i+1}", key=f"nav_{i}"):
+                st.session_state[f"ptr_{sec}"] = i
+                st.rerun()
+        
+        st.divider()
         if st.button("🏁 Submit Section", type="primary"):
-            score, total = calculate_section_score(sec)
-            st.session_state.completed_sections[sec] = (score, total)
+            st.session_state.results[sec] = get_score(sec)
             st.session_state.view = "Lobby"
             st.rerun()
 
-    # MAIN QUESTION UI
-    q_item = data["questions"][ptr]
+    # Main Question UI
+    q = data["questions"][ptr]
     st.title(data["title"])
     with st.container(border=True):
-        st.write(f"**Question {ptr+1} of {len(data['questions'])}**")
-        st.markdown(f"### {q_item['q']}")
-        
-        current_ans = st.session_state[f"answers_{sec}"].get(ptr)
-        choice = st.radio("Select an option:", q_item["options"], 
-                          index=q_item["options"].index(current_ans) if current_ans else None,
-                          key=f"q_{sec}_{ptr}")
-        
-        if choice:
-            st.session_state[f"answers_{sec}"][ptr] = choice
+        st.write(f"Question {ptr+1} of {len(data['questions'])}")
+        st.subheader(q["q"])
+        u_ans = st.session_state.answers[sec].get(ptr)
+        choice = st.radio("Options:", q["options"], index=q["options"].index(u_ans) if u_ans else None, key=f"rad_{ptr}")
+        if choice: st.session_state.answers[sec][ptr] = choice
 
-    # FOOTER CONTROLS
-    c1, c2, c3 = st.columns([1,1,1])
-    with c1:
-        if st.button("⬅️ Previous", disabled=(ptr == 0)):
-            st.session_state[f"ptr_{sec}"] -= 1
+    # Controls
+    c1, c2, c3 = st.columns(3)
+    with c1: 
+        if st.button("⬅️ Previous") and ptr > 0: st.session_state[f"ptr_{sec}"] -= 1; st.rerun()
+    with c2: 
+        if st.button("🚩 Flag"):
+            if ptr in st.session_state.flags[sec]: st.session_state.flags[sec].remove(ptr)
+            else: st.session_state.flags[sec].append(ptr)
             st.rerun()
-    with c2:
-        if st.button("🚩 Flag Question"):
-            if ptr in st.session_state[f"flags_{sec}"]: st.session_state[f"flags_{sec}"].remove(ptr)
-            else: st.session_state[f"flags_{sec}"].append(ptr)
-            st.rerun()
-    with c3:
-        if st.button("Next ➡️", disabled=(ptr == len(data["questions"])-1)):
-            st.session_state[f"ptr_{sec}"] += 1
-            st.rerun()
+    with c3: 
+        if st.button("Next ➡️") and ptr < len(data["questions"])-1: st.session_state[f"ptr_{sec}"] += 1; st.rerun()
+    
+    time.sleep(1)
+    st.rerun()
 
-# 4C. POST-SECTION DECISION SCREEN (Prevents "Dark Screen")
-elif st.session_state.view == "PostSection":
-    st.title("Section Submitted!")
-    st.balloons()
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔍 Review This Section", use_container_width=True):
-            st.session_state.view = "SectionDetail"
-            st.rerun()
-    with col2:
-        if st.button("🏠 Back to Lobby", use_container_width=True):
-            st.session_state.view = "Lobby"
-            st.rerun()
-
-# 4D. SECTION DETAIL REVIEW
-elif st.session_state.view == "SectionDetail":
-    sec = st.session_state.just_finished
-    st.title(f"Review: {sec}")
-    if st.button("Back to Lobby"):
-        st.session_state.view = "Lobby"
-        st.rerun()
-        
+# --- 7. REVIEW MODULE ---
+elif st.session_state.view.startswith("Review_"):
+    sec = st.session_state.view.replace("Review_", "")
+    st.title(f"Review: {EXAM_DATA[sec]['title']}")
+    if st.button("Back to Lobby"): st.session_state.view = "Lobby"; st.rerun()
+    
     for i, q in enumerate(EXAM_DATA[sec]["questions"]):
         with st.expander(f"Question {i+1}"):
             st.write(q["q"])
-            u_ans = st.session_state[f"answers_{sec}"].get(i, "Not Answered")
-            c_ans = q["options"][q["correct"]]
-            if u_ans == c_ans: st.success(f"Correct: {u_ans}")
-            else: 
-                st.error(f"Your Answer: {u_ans}")
-                st.success(f"Correct Answer: {c_ans}")
-            st.info(f"**Explanation:** {q['explanation']}")
-
+            ua = st.session_state.answers[sec].get(i, "No Answer")
+            ca = q["options"][q["correct"]]
+            if ua == ca: st.success(f"Correct: {ua}")
+            else: st.error(f"Your Answer: {ua}"); st.success(f"Correct: {ca}")
+            st.info(f"Explanation: {q['explanation']}")
