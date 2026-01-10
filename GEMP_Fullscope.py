@@ -1,16 +1,11 @@
 import streamlit as st
 import time
 
-# --- 1. APP CONFIG & DATA ---
+# --- 1. APP CONFIG ---
 st.set_page_config(page_title="GEMP 2026 Unified Simulator", layout="wide")
 
-if 'view' not in st.session_state: st.session_state.view = "Lobby"
-if 'completed' not in st.session_state: st.session_state.completed = []
-if 'answers' not in st.session_state: st.session_state.answers = {"Part A": {}, "Part B": {}, "General": {}}
-if 'flags' not in st.session_state: st.session_state.flags = {"Part A": [], "Part B": [], "General": []}
-if 'start_times' not in st.session_state: st.session_state.start_times = {}
-if 'just_finished' not in st.session_state: st.session_state.just_finished = None
-    
+# --- 2. DATA INITIALIZATION ---
+# Ensure every section has "title", "limit", and "questions"
 EXAM_DATA = {
     "Part A": {
         "title": "Part A: General Science",
@@ -1759,10 +1754,17 @@ Total      |   205     |     80      |    89    |  374
         ]
     }
 }
-# --- 2. LOBBY VIEW ---
+# --- 3. SESSION STATE SAFETY ---
+if 'view' not in st.session_state: st.session_state.view = "Lobby"
+if 'completed' not in st.session_state: st.session_state.completed = []
+if 'answers' not in st.session_state: st.session_state.answers = {k: {} for k in EXAM_DATA.keys()}
+if 'flags' not in st.session_state: st.session_state.flags = {k: [] for k in EXAM_DATA.keys()}
+if 'start_times' not in st.session_state: st.session_state.start_times = {}
+if 'just_finished' not in st.session_state: st.session_state.just_finished = None
+
+# --- 4. LOBBY VIEW ---
 if st.session_state.view == "Lobby":
     st.title("🏛️ GEMP Unified Entrance Portal")
-    st.info("Select a module to begin. You can review results after each section or at the very end.")
     
     cols = st.columns(3)
     for i, (key, info) in enumerate(EXAM_DATA.items()):
@@ -1771,34 +1773,30 @@ if st.session_state.view == "Lobby":
                 st.subheader(info["title"])
                 if key in st.session_state.completed:
                     st.success("✅ Section Completed")
-                    if st.button(f"Review {key} Results", key=f"rev_{key}"):
+                    if st.button(f"Review {key} Results", key=f"rev_btn_{key}"):
                         st.session_state.just_finished = key
                         st.session_state.view = "SectionDetail"
                         st.rerun()
                 else:
-                    if st.button(f"🚀 Start {key}", key=f"go_{key}", use_container_width=True):
+                    if st.button(f"🚀 Start {key}", key=f"go_btn_{key}", use_container_width=True):
                         st.session_state.start_times[key] = time.time()
                         st.session_state.view = key
                         st.session_state[f"ptr_{key}"] = 0
                         st.rerun()
 
-    if st.session_state.completed:
-        st.divider()
-        if st.button("📊 VIEW FULL COMBINED REPORT", type="primary", use_container_width=True):
-            st.session_state.view = "FullResults"
-            st.rerun()
-
-# --- 3. EXAM MODULE ---
+# --- 5. EXAM MODULE (The Error Fix) ---
 elif st.session_state.view in EXAM_DATA:
     sec = st.session_state.view
     data = EXAM_DATA[sec]
     ptr = st.session_state.get(f"ptr_{sec}", 0)
     
-    # Timer & Nav Sidebar
     with st.sidebar:
-        # Timer Calculation
-        elapsed = time.time() - st.session_state.start_times[sec]
-        rem = data["limit"] - elapsed
+        # SAFETY CHECK: Fallback to 90 mins if 'limit' is missing
+        time_limit = data.get("limit", 5400) 
+        
+        elapsed = time.time() - st.session_state.start_times.get(sec, time.time())
+        rem = time_limit - elapsed
+        
         if rem <= 0:
             st.session_state.completed.append(sec)
             st.session_state.just_finished = sec
@@ -1810,16 +1808,6 @@ elif st.session_state.view in EXAM_DATA:
         st.header(f"⏱️ {h:02d}:{m:02d}:{s:02d}")
         
         st.divider()
-        st.write("**Navigation Grid**")
-        nav_cols = st.columns(4)
-        for i in range(len(data["questions"])):
-            lbl = f"{i+1}"
-            if i in st.session_state.flags[sec]: lbl = f"🚩{i+1}"
-            elif i in st.session_state.answers[sec]: lbl = f"🔵{i+1}"
-            if nav_cols[i % 4].button(lbl, key=f"nav_{i}"):
-                st.session_state[f"ptr_{sec}"] = i
-                st.rerun()
-        
         if st.button("🏁 Submit Section", type="primary"):
             st.session_state.completed.append(sec)
             st.session_state.just_finished = sec
@@ -1833,40 +1821,38 @@ elif st.session_state.view in EXAM_DATA:
         st.write(f"Question {ptr+1} of {len(data['questions'])}")
         st.markdown(f"### {q_item['q']}")
         u_ans = st.session_state.answers[sec].get(ptr)
-        choice = st.radio("Options:", q_item["options"], index=q_item["options"].index(u_ans) if u_ans else None, key=f"r_{sec}_{ptr}")
+        choice = st.radio("Options:", q_item["options"], 
+                          index=q_item["options"].index(u_ans) if u_ans else None, 
+                          key=f"radio_{sec}_{ptr}")
         if choice: st.session_state.answers[sec][ptr] = choice
 
-    # Controls
+    # Navigation Controls
     c1, c2, c3 = st.columns(3)
     with c1:
         if st.button("⬅️ Previous") and ptr > 0:
-            st.session_state[f"ptr_{sec}"] -= 1
+            st.session_state[f"ptr_{sec}"] = ptr - 1
             st.rerun()
     with c2:
         if st.button("🚩 Flag"):
             if ptr in st.session_state.flags[sec]: st.session_state.flags[sec].remove(ptr)
             else: st.session_state.flags[sec].append(ptr)
-            st.rerun()
     with c3:
         if st.button("Next ➡️") and ptr < len(data["questions"])-1:
-            st.session_state[f"ptr_{sec}"] += 1
+            st.session_state[f"ptr_{sec}"] = ptr + 1
             st.rerun()
 
-# --- 4. POST-SECTION DECISION & RESULTS ---
-elif st.session_state.view == "PostSection":
-    st.title("Section Finished!")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("View This Section's Results"): st.session_state.view = "SectionDetail"; st.rerun()
-    with col2:
-        if st.button("Back to Lobby"): st.session_state.view = "Lobby"; st.rerun()
-
+# --- 6. INDIVIDUAL REVIEW VIEW ---
 elif st.session_state.view == "SectionDetail":
     sec = st.session_state.just_finished
-    st.header(f"Review: {sec}")
+    st.header(f"Detailed Review: {sec}")
+    
     for i, q in enumerate(EXAM_DATA[sec]["questions"]):
         with st.expander(f"Question {i+1}"):
             st.write(q["q"])
-            st.write(f"Correct Answer: {q['options'][q['correct']]}")
-            st.info(f"Explanation: {q['explanation']}")
-    if st.button("Back to Lobby"): st.session_state.view = "Lobby"; st.rerun()
+            st.write(f"**Correct Answer:** {q['options'][q['correct']]}")
+            st.info(f"**Explanation:** {q['explanation']}")
+            
+    if st.button("Back to Lobby"):
+        st.session_state.view = "Lobby"
+        st.rerun()
+
