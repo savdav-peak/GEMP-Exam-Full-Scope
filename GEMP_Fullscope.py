@@ -1745,7 +1745,7 @@ Total      |   205     |     80      |    89    |  374
                 "correct": 2, "explanation": "Multiply eq1 by 2: 2x + 4y = 18. Add to eq2: (3x - 4y) + (2x + 4y) = -33 + 18. 5x = -15 -> x = -3. Sub x into eq1: -3 + 2y = 9 -> 2y = 12 -> y = 6."
             }           
         ]
-
+    }
 # --- SESSION INITIALIZATION ---
 if 'view' not in st.session_state: st.session_state.view = "Lobby"
 if 'completed' not in st.session_state: st.session_state.completed = []
@@ -1860,6 +1860,7 @@ elif st.session_state.view == "Results":
                     st.success(f"Correct Answer: {correct_ans}")
                     st.info(f"Explanation: {q['explanation']}")
                     st.divider()
+
 
 
 
