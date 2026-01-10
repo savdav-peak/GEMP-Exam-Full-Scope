@@ -1754,79 +1754,70 @@ Total      |   205     |     80      |    89    |  374
         ]
     }
 }
-# --- 3. SESSION STATE INITIALIZATION ---
-# Using a loop to ensure all keys exist for all sections
-for key in EXAM_DATA.keys():
-    if f"ptr_{key}" not in st.session_state: st.session_state[f"ptr_{key}"] = 0
-    if f"answers_{key}" not in st.session_state: st.session_state[f"answers_{key}"] = {}
-    if f"flags_{key}" not in st.session_state: st.session_state[f"flags_{key}"] = []
-
+# --- 3. SESSION STATE (STATE-SYNC) ---
 if 'view' not in st.session_state: st.session_state.view = "Lobby"
-if 'completed' not in st.session_state: st.session_state.completed = []
+if 'completed_sections' not in st.session_state: st.session_state.completed_sections = {} # Stores scores
+if 'answers' not in st.session_state: st.session_state.answers = {k: {} for k in EXAM_DATA}
 if 'start_times' not in st.session_state: st.session_state.start_times = {}
-if 'just_finished' not in st.session_state: st.session_state.just_finished = None
 
-# --- 4. VIEW LOGIC ---
+# --- 4. CALCULATING SCORES ---
+def calculate_section_score(sec_key):
+    data = EXAM_DATA[sec_key]["questions"]
+    user_answers = st.session_state.answers[sec_key]
+    correct_count = 0
+    for i, q in enumerate(data):
+        if user_answers.get(i) == q["options"][q["correct"]]:
+            correct_count += 1
+    return correct_count, len(data)
 
-# 4A. LOBBY VIEW
+# --- 5. VIEWS ---
+
+# 5A. LOBBY VIEW
 if st.session_state.view == "Lobby":
-    st.title("🎓 GEMP Unified Portal")
+    st.title("🏛️ GEMP 2026 Entrance Simulator")
+    
+    total_score = sum([v[0] for v in st.session_state.completed_sections.values()])
+    total_qs = sum([v[1] for v in st.session_state.completed_sections.values()])
+    
+    if total_qs > 0:
+        st.metric("OVERALL SCORE", f"{total_score} / {total_qs}", f"{round((total_score/total_qs)*100, 1)}%")
+
     cols = st.columns(3)
     for i, (key, info) in enumerate(EXAM_DATA.items()):
         with cols[i]:
             with st.container(border=True):
                 st.subheader(info["title"])
-                if key in st.session_state.completed:
-                    st.success("✅ Completed")
-                    if st.button(f"Review {key} Results", key=f"rev_{key}"):
-                        st.session_state.just_finished = key
-                        st.session_state.view = "SectionDetail"
-                        st.rerun()
+                st.caption(info["description"]) # Added description
+                
+                if key in st.session_state.completed_sections:
+                    s, t = st.session_state.completed_sections[key]
+                    st.success(f"Score: {s}/{t} ({round((s/t)*100, 1)}%)")
                 else:
-                    if st.button(f"Start {key}", key=f"start_{key}", use_container_width=True):
+                    if st.button(f"🚀 Begin {key}", key=f"btn_{key}", use_container_width=True):
                         st.session_state.start_times[key] = time.time()
                         st.session_state.view = key
                         st.rerun()
 
-# 4B. EXAM MODULE (The Fix for Navigation & Timer)
+# 5B. EXAM VIEW (Fixed Timer & Score Logic)
 elif st.session_state.view in EXAM_DATA:
     sec = st.session_state.view
     data = EXAM_DATA[sec]
-    ptr = st.session_state[f"ptr_{sec}"]
     
-    # TIMER CALCULATION
-    elapsed = time.time() - st.session_state.start_times[sec]
-    remaining = data["time_limit"] - elapsed
-    
-    if remaining <= 0:
-        st.session_state.completed.append(sec)
-        st.session_state.just_finished = sec
-        st.session_state.view = "PostSection"
-        st.rerun()
-
-    # SIDEBAR NAVIGATION
+    # Live Sidebar
     with st.sidebar:
-        mins, secs = divmod(int(remaining), 60)
-        st.header(f"⏱️ {mins:02d}:{secs:02d}")
-        st.divider()
+        elapsed = time.time() - st.session_state.start_times[sec]
+        rem = data["time_limit"] - elapsed
         
-        # Grid Navigation
-        st.write("Questions:")
-        cols = st.columns(4)
-        for i in range(len(data["questions"])):
-            btn_label = f"{i+1}"
-            if i in st.session_state[f"flags_{sec}"]: btn_label = f"🚩{i+1}"
-            elif i in st.session_state[f"answers_{sec}"]: btn_label = f"🔵{i+1}"
-            
-            if cols[i % 4].button(btn_label, key=f"nav_{sec}_{i}"):
-                st.session_state[f"ptr_{sec}"] = i
-                st.rerun()
+        # High-Fidelity Timer
+        m, s = divmod(int(rem), 60)
+        h, m = divmod(m, 60)
+        st.header(f"⏱️ {h:02d}:{m:02d}:{s:02d}")
         
         st.divider()
-        if st.button("🏁 Submit Section", type="primary", use_container_width=True):
-            st.session_state.completed.append(sec)
-            st.session_state.just_finished = sec
-            st.session_state.view = "PostSection"
+        if st.button("🏁 Submit Section", type="primary"):
+            score, total = calculate_section_score(sec)
+            st.session_state.completed_sections[sec] = (score, total)
+            st.session_state.view = "Lobby"
             st.rerun()
 
     # MAIN QUESTION UI
@@ -1892,3 +1883,4 @@ elif st.session_state.view == "SectionDetail":
                 st.error(f"Your Answer: {u_ans}")
                 st.success(f"Correct Answer: {c_ans}")
             st.info(f"**Explanation:** {q['explanation']}")
+
